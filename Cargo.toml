@@ -1,0 +1,12 @@
+[package]
+name = "rosu-snippets"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+eyre = "0.6.12"
+rdev = "0.5.3"
+rosu-map = "0.2.1"
+rosu-mem = "2.0.0"
+rosu_memory_lib = "1.0.3"
+tokio = "1.46.1"
