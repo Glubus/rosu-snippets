@@ -1,9 +1,12 @@
+mod utils;
+mod snippets;
+use crate::utils::hit_object_to_string;
+use crate::snippets::structs::SnippetsTimingPoints;
 use rosu_memory_lib::reader::gameplay::stable::memory::get_ig_time;
 use rosu_memory_lib::{init_loop};
 use rosu_mem::process::{Process, ProcessTraits};
 use rosu_memory_lib::reader::structs::{State};
-use rosu_memory_lib::reader::beatmap::stable::memory::{get_beatmap_info};
-use rosu_memory_lib::reader::beatmap::common::BeatmapInfo;
+
 use eyre::Result;
 use rdev::{listen, Event, EventType, Key};
 use std::sync::{Arc, Mutex};
@@ -16,75 +19,24 @@ use std::fs;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use rosu_map::section::hit_objects::HitObjects;
-#[derive(Clone)]
-struct SnippetsTimingPoints {
-    pub time1: i32,
-    pub time2: i32,
-    pub last: bool, // false = time1, true = time2
-}
+
 
 struct AppState {
-    beatmap_info: Option<BeatmapInfo>,
-    timing_points: SnippetsTimingPoints,
+        timing_points: SnippetsTimingPoints,
 }
 
-fn check_beatmap_info(process: &Process, state: &mut State, app_state: Arc<Mutex<AppState>>) -> Result<()> {
-    if let Ok(beatmap_info) = get_beatmap_info(process, state) {
-        let mut app = app_state.lock().unwrap();
-        if app.beatmap_info.is_some() {
-            if app.beatmap_info.as_ref().unwrap().technical.md5 == beatmap_info.technical.md5 && app.beatmap_info.as_ref().unwrap().metadata.difficulty == beatmap_info.metadata.difficulty {
-                Ok(())
-            } else {
-                app.beatmap_info = Some(beatmap_info);
-                println!("Beatmap info: {:?}", app.beatmap_info.as_ref().unwrap().metadata.title_original);
-                Ok(())
-            }
-        }
-        else {
-            app.beatmap_info = Some(beatmap_info);
-            println!("Beatmap info: {:?}", app.beatmap_info.as_ref().unwrap().metadata.title_original);
-            Ok(())
-        }
-    } else {
-        Err(eyre::eyre!("Failed to get beatmap info"))
-    }
-}
+
 
 fn set_timing_points(process: &Process, state: &mut State, app_state: Arc<Mutex<AppState>>) -> Result<()> {
     if let Ok(ig_time) = get_ig_time(process, state) {
         let mut app = app_state.lock().unwrap();
-        if app.timing_points.last {
-            app.timing_points.time2 = ig_time;
-            app.timing_points.last = false;
-            println!("Timing points: {:?}, {:?}", app.timing_points.time1, app.timing_points.time2);
-            Ok(())
-        } else {
-            app.timing_points.time1 = ig_time;
-            app.timing_points.last = true;
-            println!("Timing points: {:?}, {:?}", app.timing_points.time1, app.timing_points.time2);
-            Ok(())
-        }
+        app.timing_points.set_next(ig_time)?;
+        Ok(())
     } else {
         Err(eyre::eyre!("Failed to get ig time"))
     }
 }
-fn hit_object_to_string(hit_object: HitObject) -> String {
-    match hit_object.kind {
-        HitObjectKind::Circle(circle) => {
-            format!("{},{},{},{},0,0:0:0:0:0:", circle.pos.x, circle.pos.y, hit_object.start_time, 1<<0)
-        }
-        HitObjectKind::Slider(slider) => {
-            format!("{},{},{},{},0,B|0:0,1,100,0:0:0:0", slider.pos.x, slider.pos.y, hit_object.start_time, 1<<1)
-        }
-        HitObjectKind::Spinner(spinner) => {
-            format!("{},{},{},{},0,{},0:0:0:0:", 256, 192, hit_object.start_time, 1<<3, hit_object.start_time + 1000.0)
-        }
-        HitObjectKind::Hold(hold) => {
-            format!("{},{},{},{},0,{},0:0:0:0:", hold.pos_x, hold.pos_x, hit_object.start_time, 1<<7, hit_object.start_time + hold.duration)
-        }
-        _ => String::new()
-    }
-}
+
 
 fn get_time_points(b: &Beatmap, timing_points: &SnippetsTimingPoints) -> TimingPoint {
     let mut closest_point = None;
@@ -92,12 +44,12 @@ fn get_time_points(b: &Beatmap, timing_points: &SnippetsTimingPoints) -> TimingP
 
     for timing_point in b.control_points.timing_points.clone() {
         // Si on trouve un point dans l'intervalle, on le retourne directement
-        if timing_point.time >= timing_points.time1 as f64 && timing_point.time <= timing_points.time2 as f64 {
+        if timing_point.time >= timing_points.time_start as f64 && timing_point.time <= timing_points.time_end as f64 {
             return timing_point;
         }
         
         // Sinon on garde trace du point le plus proche de time1
-        let distance = (timing_point.time - timing_points.time1 as f64).abs();
+        let distance = (timing_point.time - timing_points.time_start as f64).abs();
         if distance < min_distance {
             min_distance = distance;
             closest_point = Some(timing_point);
@@ -118,7 +70,7 @@ fn save_snippets(process: &Process, state: &mut State, app_state: Arc<Mutex<AppS
     
     // Collect hit objects in the time range
     for hit_object in hit_objects {
-        if hit_object.start_time >= timing_points.time1 as f64 && hit_object.start_time <= timing_points.time2 as f64 {
+        if hit_object.start_time >= timing_points.time_start as f64 && hit_object.start_time <= timing_points.time_end as f64 {
             snippets.push(hit_object);  
         }
     }
@@ -221,20 +173,12 @@ fn main() -> Result<()> {
     println!("Successfully initialized!");
     
     let app_state = Arc::new(Mutex::new(AppState {
-        beatmap_info: None,
-        timing_points: SnippetsTimingPoints {
-            time1: 0,
-            time2: 0,
-            last: false,
-        }
+        timing_points: SnippetsTimingPoints::new()
     }));
     
     let app_state_clone = Arc::clone(&app_state);
     let callback = move |event: Event| {
         match event.event_type {
-            EventType::KeyPress(Key::Num1) => {
-                check_beatmap_info(&process, &mut state, Arc::clone(&app_state_clone));
-            },
             EventType::KeyPress(Key::Num2) => {
                 set_timing_points(&process, &mut state, Arc::clone(&app_state_clone));
             },
