@@ -49,9 +49,10 @@ impl Snippets {
         hit_object.start_time -= reference_time;
     }
 
-    pub fn save_snippets_to_file(&self, snippets_path: &str, reference_time: f64) -> Result<()> {
+    pub fn save_snippets_to_file(&self, snippets_name: &str, reference_time: f64) -> Result<()> {
         println!("Saving snippets to file");
         let mut map = Beatmap::default();
+        map.title = snippets_name.to_string();
         map.hit_objects = self.hit_objects.clone();
         for hit_object in map.hit_objects.iter_mut() {
             self.normalize_hit_object(hit_object, reference_time);
@@ -61,7 +62,7 @@ impl Snippets {
         t_points.time = 0.0;
         map.control_points.timing_points = vec![t_points];
         
-        let snippets_path = std::path::Path::new("snippets").join(snippets_path);
+        let snippets_path = std::path::Path::new("snippets").join(snippets_name);
         let file = File::create(snippets_path)?;
         let writer = BufWriter::new(file);
         map.encode(writer)?;
