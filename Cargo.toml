@@ -4,9 +4,13 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+eframe = "0.32.0"
+egui = "0.32.0"
+egui_extras = { version = "0.32.0", features = ["image"] }
 eyre = "0.6.12"
+rand = "0.9.1"
 rdev = "0.5.3"
 rosu-map = "0.2.1"
 rosu-mem = "2.0.0"
-rosu_memory_lib = "1.0.3"
+rosu-memory-lib = { git = "https://github.com/glubus/rosu-memory-lib.git", tag = "v1.0.3" }
 tokio = "1.46.1"

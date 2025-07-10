@@ -8,19 +8,35 @@ use std::fs::File;
 use std::io::{BufReader, BufWriter};
 use rosu_map::{Beatmap, DecodeBeatmap};
 use rosu_memory_lib::reader::beatmap::stable::file::get_beatmap_path;
-
+use rosu_map::section::hit_objects::HitObjectKind;
+use rand::seq::SliceRandom;
+use rand::Rng;
 #[derive(Clone, Debug)]
 pub struct Snippets {
+    pub name: String,
     pub hit_objects: Vec<HitObject>,
     pub timing_points: TimingPoint,
+    pub is_saved: bool,
+    pub should_shuffle: bool,  // Nouvelle option pour le shuffle
 }
 
 impl Snippets {
     pub fn new() -> Self {
         Self {
+            name: String::new(),
             hit_objects: Vec::new(),
             timing_points: TimingPoint::default(),
+            is_saved: false,
+            should_shuffle: false,
         }
+    }
+
+    /// TODO: Supporter plus que 4 colonnes en récupérant le nombre de colonnes depuis la beatmap
+    fn shuffle_column(&self, column: usize) -> usize {
+        // Pour l'instant on hardcode 4 colonnes
+        let mut columns: Vec<usize> = (0..4).collect();
+        columns.shuffle(&mut rand::thread_rng());
+        columns[column]
     }
 
     pub fn load_snippets_memory_path(&mut self, process: &Process, state: &mut State, snippets_maker: &SnippetsMaker) -> Result<()> {
@@ -39,24 +55,22 @@ impl Snippets {
 
         // Decode snippets
         let snippets = Beatmap::decode(reader)?;
+        self.name = snippets.title.clone();
         self.hit_objects = snippets.hit_objects.clone();
         self.timing_points = snippets.control_points.timing_points[0].clone();
+        self.is_saved = true;
         println!("Snippets loaded from file");
         Ok(())
     }
 
-    pub fn normalize_hit_object(&self, hit_object: &mut HitObject, reference_time: f64) {
-        hit_object.start_time -= reference_time;
-    }
 
-    pub fn save_snippets_to_file(&self, snippets_name: &str, reference_time: f64) -> Result<()> {
+    pub fn save_snippets_to_file(&mut self, snippets_name: &str) -> Result<()> {
         println!("Saving snippets to file");
+        self.name = snippets_name.to_string();  // Mettre à jour le nom avec le nom du fichier
+
         let mut map = Beatmap::default();
-        map.title = snippets_name.to_string();
+        map.title = self.name.clone();
         map.hit_objects = self.hit_objects.clone();
-        for hit_object in map.hit_objects.iter_mut() {
-            self.normalize_hit_object(hit_object, reference_time);
-        }
 
         let mut t_points = self.timing_points.clone();
         t_points.time = 0.0;
@@ -66,6 +80,7 @@ impl Snippets {
         let file = File::create(snippets_path)?;
         let writer = BufWriter::new(file);
         map.encode(writer)?;
+        self.is_saved = true;
         println!("Snippets saved to file");
         Ok(())
     }
@@ -102,8 +117,16 @@ impl Snippets {
     }
     
     pub fn load_snippets_from_beatmap(&mut self, beatmap: &Beatmap, snippets_maker: &SnippetsMaker) -> Result<()> {
+        println!("Loading snippets from beatmap");
         self.collect_hit_objects(beatmap, snippets_maker)?;
         self.collect_timing_points(beatmap, snippets_maker)?;
+        
+        // Normaliser les temps des notes par rapport au temps de début
+        for hit_object in self.hit_objects.iter_mut() {
+            hit_object.start_time -= snippets_maker.time_start as f64;
+        }
+        
+        println!("Snippets loaded from beatmap");
         Ok(())
     }
 
@@ -121,8 +144,37 @@ impl Snippets {
         let time_scale = current_beat_len / self.timing_points.beat_len;
         let placement_time = get_ig_time(process, state)?;
 
+        // Générer le mapping des colonnes une seule fois si shuffle est activé
+        let column_mapping: Option<Vec<usize>> = if self.should_shuffle {
+            let mut columns: Vec<usize> = (0..4).collect();
+            columns.shuffle(&mut rand::thread_rng());
+            Some(columns)
+        } else {
+            None
+        };
+
         for mut obj in self.hit_objects.clone() {
             obj.start_time = obj.start_time * time_scale + placement_time as f64;
+            
+            // Appliquer le shuffle si activé
+            if self.should_shuffle {
+                if let Some(mapping) = &column_mapping {
+                    match obj.kind {
+                        HitObjectKind::Circle(ref mut h) => {
+                            let column = (h.pos.x / 512.0 * 4.0) as usize % 4;
+                            let new_column = mapping[column];
+                            h.pos.x = (new_column as f32 * 512.0 / 4.0) + (512.0 / 8.0); // Centrer dans la colonne
+                        }
+                        HitObjectKind::Hold(ref mut h) => {
+                            let column = (h.pos_x / 512.0 * 4.0) as usize % 4;
+                            let new_column = mapping[column];
+                            h.pos_x = (new_column as f32 * 512.0 / 4.0) + (512.0 / 8.0); // Centrer dans la colonne
+                        }
+                        _ => continue,
+                    }
+                }
+            }
+
             beatmap.hit_objects.push(obj);
         }
 
@@ -183,4 +235,3 @@ impl SnippetsMaker {
         }
     }
 }
-
