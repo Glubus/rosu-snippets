@@ -18,6 +18,8 @@ pub struct Snippets {
     pub timing_points: TimingPoint,
     pub is_saved: bool,
     pub should_shuffle: bool,  // Nouvelle option pour le shuffle
+    pub keycount: usize, // mania only 
+    pub tags: Vec<String>,
 }
 
 impl Snippets {
@@ -28,13 +30,15 @@ impl Snippets {
             timing_points: TimingPoint::default(),
             is_saved: false,
             should_shuffle: false,
+            keycount: 4,
+            tags: Vec::new(),
         }
     }
 
     /// TODO: Supporter plus que 4 colonnes en récupérant le nombre de colonnes depuis la beatmap
     fn shuffle_column(&self, column: usize) -> usize {
         // Pour l'instant on hardcode 4 colonnes
-        let mut columns: Vec<usize> = (0..4).collect();
+        let mut columns: Vec<usize> = (0..self.keycount).collect();
         columns.shuffle(&mut rand::thread_rng());
         columns[column]
     }
@@ -58,6 +62,8 @@ impl Snippets {
         self.name = snippets.title.clone();
         self.hit_objects = snippets.hit_objects.clone();
         self.timing_points = snippets.control_points.timing_points[0].clone();
+        self.tags = snippets.tags.split(" ").map(|s| s.to_string()).collect();
+        self.keycount = snippets.circle_size as usize;
         self.is_saved = true;
         println!("Snippets loaded from file");
         Ok(())
@@ -71,7 +77,8 @@ impl Snippets {
         let mut map = Beatmap::default();
         map.title = self.name.clone();
         map.hit_objects = self.hit_objects.clone();
-
+        map.tags = self.tags.clone().join(" ");
+        map.circle_size = self.keycount as f32;
         let mut t_points = self.timing_points.clone();
         t_points.time = 0.0;
         map.control_points.timing_points = vec![t_points];
@@ -120,6 +127,7 @@ impl Snippets {
         println!("Loading snippets from beatmap");
         self.collect_hit_objects(beatmap, snippets_maker)?;
         self.collect_timing_points(beatmap, snippets_maker)?;
+        self.keycount = beatmap.circle_size as usize;
         
         // Normaliser les temps des notes par rapport au temps de début
         for hit_object in self.hit_objects.iter_mut() {
@@ -135,6 +143,7 @@ impl Snippets {
         println!("Inserting snippets to beatmap");
         let beatmap_path = get_beatmap_path(process, state)?;
         let mut beatmap = Beatmap::from_path(&beatmap_path)?;
+        beatmap.tags = self.tags.clone().join(" ");
         let current_beat_len = if let Some(last_timing) = beatmap.control_points.timing_points.last() {
             last_timing.beat_len
         } else {
@@ -146,7 +155,7 @@ impl Snippets {
 
         // Générer le mapping des colonnes une seule fois si shuffle est activé
         let column_mapping: Option<Vec<usize>> = if self.should_shuffle {
-            let mut columns: Vec<usize> = (0..4).collect();
+            let mut columns: Vec<usize> = (0..self.keycount).collect();
             columns.shuffle(&mut rand::thread_rng());
             Some(columns)
         } else {
@@ -161,14 +170,14 @@ impl Snippets {
                 if let Some(mapping) = &column_mapping {
                     match obj.kind {
                         HitObjectKind::Circle(ref mut h) => {
-                            let column = (h.pos.x / 512.0 * 4.0) as usize % 4;
+                            let column = (h.pos.x / 512.0 * self.keycount as f32) as usize % self.keycount;
                             let new_column = mapping[column];
-                            h.pos.x = (new_column as f32 * 512.0 / 4.0) + (512.0 / 8.0); // Centrer dans la colonne
+                            h.pos.x = (new_column as f32 * 512.0 / self.keycount as f32) + (512.0 / 8.0); // Centrer dans la colonne
                         }
                         HitObjectKind::Hold(ref mut h) => {
-                            let column = (h.pos_x / 512.0 * 4.0) as usize % 4;
+                            let column = (h.pos_x / 512.0 * self.keycount as f32) as usize % self.keycount;
                             let new_column = mapping[column];
-                            h.pos_x = (new_column as f32 * 512.0 / 4.0) + (512.0 / 8.0); // Centrer dans la colonne
+                            h.pos_x = (new_column as f32 * 512.0 / self.keycount as f32) + (512.0 / 8.0); // Centrer dans la colonne
                         }
                         _ => continue,
                     }
@@ -193,7 +202,7 @@ pub struct SnippetsMaker {
     pub next_update: NextUpdate,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum NextUpdate {
     TimeStart,
     TimeEnd,
