@@ -1,0 +1,15 @@
+name: rosu-memory
+
+on:
+  release:
+    types: ["published"]
+  push:
+    branches: ["master"]
+  pull_request:
+    types: [ opened, reopened, edited, synchronize ]
+    paths-ignore:
+      - '*.md'
+
+jobs:
+  check:
+    uses: ./.github/workflows/check.yml

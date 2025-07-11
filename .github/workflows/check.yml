@@ -1,0 +1,49 @@
+name: Check
+
+on:
+  workflow_call
+
+jobs:
+  check:
+    name: Check ${{ matrix.os }} ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+    steps:
+      - name: Update Rust
+        run: rustup update stable
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Install musl
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: rustup target add x86_64-unknown-linux-musl
+      - name: Run cargo check
+        run: cargo check --verbose --target ${{ matrix.target }}
+      - name: Run cargo clippy
+        run: cargo clippy --all-features --all-targets -- -Dwarnings
+      - name: Run tests
+        run: cargo test
+      - name: Build Release
+        run: cargo build --release
+      - name: Upload artifacts linux
+        if: "matrix.target != 'x86_64-pc-windows-msvc'"
+        uses: actions/upload-artifact@v4
+        with:
+          name: rosu-memory-${{ matrix.target }}
+          path: target/release/rosu-memory
+          retention-days: 5
+      - name: Upload artifacts windows 
+        if: "matrix.target == 'x86_64-pc-windows-msvc'"
+        uses: actions/upload-artifact@v4
+        with:
+          name: rosu-memory-${{ matrix.target }}.exe
+          path: target/release/rosu-memory.exe
+          retention-days: 5

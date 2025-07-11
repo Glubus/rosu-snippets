@@ -39,7 +39,7 @@ impl Snippets {
     fn shuffle_column(&self, column: usize) -> usize {
         // Pour l'instant on hardcode 4 colonnes
         let mut columns: Vec<usize> = (0..self.keycount).collect();
-        columns.shuffle(&mut rand::thread_rng());
+        columns.shuffle(&mut rand::rng());
         columns[column]
     }
 
@@ -156,7 +156,7 @@ impl Snippets {
         // Générer le mapping des colonnes une seule fois si shuffle est activé
         let column_mapping: Option<Vec<usize>> = if self.should_shuffle {
             let mut columns: Vec<usize> = (0..self.keycount).collect();
-            columns.shuffle(&mut rand::thread_rng());
+            columns.shuffle(&mut rand::rng());
             Some(columns)
         } else {
             None
@@ -165,6 +165,9 @@ impl Snippets {
         for mut obj in self.hit_objects.clone() {
             obj.start_time = obj.start_time * time_scale + placement_time as f64;
             
+            if let HitObjectKind::Hold(ref mut h) = obj.kind {
+                h.duration = h.duration * time_scale;
+            }
             // Appliquer le shuffle si activé
             if self.should_shuffle {
                 if let Some(mapping) = &column_mapping {
@@ -221,7 +224,7 @@ impl SnippetsMaker {
 
         match self.next_update {
             NextUpdate::TimeStart => {
-                println!("Time start: {}", ig_time);
+                println!("Time start: {ig_time}");
                 self.time_start = ig_time;
                 self.next_update = NextUpdate::TimeEnd;
                 Ok(NextUpdate::TimeEnd)
